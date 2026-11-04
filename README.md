@@ -29,7 +29,8 @@ It runs **fully offline without an OpenAI key** (built-in mock LLM + hash embedd
 ## Quick start
 
 ```bash
-cd procurement-ai-platform
+git clone https://github.com/darshan82/ProcureAI.git
+cd ProcureAI
 cp .env.example .env        # optional: put your OPENAI_API_KEY in .env (git-ignored)
 docker compose up -d --build
 ```

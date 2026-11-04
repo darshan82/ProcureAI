@@ -24,7 +24,7 @@
         { "name": "S3_BUCKET", "value": "${S3_BUCKET}" },
         { "name": "S3_FORCE_PATH_STYLE", "value": "false" },
         { "name": "LANGSMITH_TRACING", "value": "true" },
-        { "name": "LANGSMITH_PROJECT", "value": "procurement-ai-platform" }
+        { "name": "LANGSMITH_PROJECT", "value": "procureai" }
       ],
       "secrets": [
         { "name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/openai-api-key" },
