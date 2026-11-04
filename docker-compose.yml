@@ -1,0 +1,145 @@
+name: procurement-ai
+
+# Shared env for api + worker. Values come from ./.env (git-ignored) with safe defaults.
+x-app-env: &app-env
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+  OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+  OPENAI_EMBEDDING_DIM: ${OPENAI_EMBEDDING_DIM:-1536}
+  LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+  LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+  LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-procurement-ai-platform}
+  LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+  MONGO_URL: mongodb://mongo:27017
+  MONGO_DB: procurement
+  REDIS_URL: redis://redis:6379
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_INGEST_TOPIC: document.ingest
+  KAFKAJS_NO_PARTITIONER_WARNING: "1"
+  S3_ENDPOINT: http://s3:4566
+  S3_REGION: us-east-1
+  S3_BUCKET: ${S3_BUCKET:-procurement-documents}
+  S3_ACCESS_KEY_ID: test
+  S3_SECRET_ACCESS_KEY: test
+  S3_FORCE_PATH_STYLE: "true"
+
+services:
+  # ---------- Infrastructure ----------
+  mongo:
+    image: mongo:7.0
+    volumes: [mongo-data:/data/db]
+    ports: ["27017:27017"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  redis:
+    # Redis 8 ships the Query Engine (FT.* / HNSW vector index) used by the semantic cache.
+    image: redis:8.2
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["29092:29092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+    networks: [backend]
+
+  s3:
+    # LocalStack = AWS S3 emulator for local dev; on AWS the same code talks to real S3.
+    image: localstack/localstack:4.4
+    ports: ["4566:4566"]
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: us-east-1
+    volumes: [s3-data:/var/lib/localstack]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:4566/_localstack/health | grep -qE 's3.: .(available|running)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks: [backend]
+
+  # ---------- Application ----------
+  api:
+    build: ./apps/api
+    image: procurement-ai/api:local
+    init: true # PID-1 signal handling for graceful shutdown
+    environment:
+      <<: *app-env
+      PORT: 4000
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret-change-me}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo123}
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
+      SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.92}
+      SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-3600}
+    ports: ["${API_PORT:-4000}:4000"]
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      s3: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [backend, frontend]
+
+  worker:
+    build: ./apps/worker
+    image: procurement-ai/worker:local
+    init: true
+    environment:
+      <<: *app-env
+      KAFKA_GROUP_ID: ingestion-workers
+      HEALTH_PORT: 4001
+    depends_on:
+      api: { condition: service_healthy } # api creates the Kafka topic + S3 bucket on boot
+    restart: unless-stopped
+    networks: [backend]
+
+  web:
+    build: ./apps/web
+    image: procurement-ai/web:local
+    ports: ["${WEB_PORT:-8080}:80"]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [frontend]
+
+networks:
+  backend:
+  frontend:
+
+volumes:
+  mongo-data:
+  redis-data:
+  kafka-data:
+  s3-data:

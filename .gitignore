@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.log
+.DS_Store
+# Secrets: never commit your real keys
+.env
+.env.*
+!.env.example
