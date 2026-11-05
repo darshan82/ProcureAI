@@ -1,0 +1,350 @@
+{
+ "title": "ProcureAI: AI platform overview",
+ "uid": "procureai-overview",
+ "schemaVersion": 39,
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "refresh": "10s",
+ "panels": [
+  {
+   "type": "stat",
+   "title": "LLM spend (24h)",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "currencyUSD"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(increase(llm_cost_usd_total[24h]))"
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "Cache hit rate (1h)",
+   "gridPos": {
+    "x": 6,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(increase(semantic_cache_requests_total{result=\"hit\"}[1h])) / clamp_min(sum(increase(semantic_cache_requests_total[1h])),1)"
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "Guardrail blocks (24h)",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "round(sum(increase(guardrail_blocks_total[24h])))"
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "Webhooks dead-lettered (24h)",
+   "gridPos": {
+    "x": 18,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "round(sum(increase(webhook_deliveries_total{status=\"dead_lettered\"}[24h])))"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Agent latency p50 / p95 by tenant",
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le, tenant) (rate(agent_run_duration_seconds_bucket[5m])))",
+     "legendFormat": "p50 {{tenant}}"
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.95, sum by (le, tenant) (rate(agent_run_duration_seconds_bucket[5m])))",
+     "legendFormat": "p95 {{tenant}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Tokens / s by tenant & model",
+   "gridPos": {
+    "x": 12,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (tenant, model) (rate(llm_tokens_total[5m]))",
+     "legendFormat": "{{tenant}} {{model}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "LLM outcomes & fallbacks",
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (model, outcome) (rate(llm_requests_total[5m]))",
+     "legendFormat": "{{model}} {{outcome}}"
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (from, to) (rate(llm_fallbacks_total[5m]))",
+     "legendFormat": "fallback {{from}}\u2192{{to}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Tool calls by tool",
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (tool) (rate(agent_tool_calls_total[5m]))",
+     "legendFormat": "{{tool}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Guardrails & PII by tenant",
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (tenant, rule) (rate(guardrail_blocks_total[5m]))",
+     "legendFormat": "block {{tenant}} {{rule}}"
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (tenant, type) (rate(pii_redactions_total[5m]))",
+     "legendFormat": "pii {{tenant}} {{type}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Webhook deliveries",
+   "gridPos": {
+    "x": 12,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (tenant, status) (rate(webhook_deliveries_total[5m]))",
+     "legendFormat": "{{tenant}} {{status}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ingestion duration p95",
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, tenant) (rate(ingestion_duration_seconds_bucket[15m])))",
+     "legendFormat": "{{tenant}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "HTTP p95 by route",
+   "gridPos": {
+    "x": 12,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))",
+     "legendFormat": "{{route}}"
+    }
+   ]
+  }
+ ],
+ "tags": [
+  "procureai"
+ ]
+}

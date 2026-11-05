@@ -1,0 +1,22 @@
+{
+  "tenantId": "umbrella",
+  "name": "Umbrella Health",
+  "region": "me-central-1",
+  "plan": "regulated",
+  "settings": {
+    "models": ["gpt-4o-mini"],
+    "cache": { "enabled": true, "threshold": 0.95 },
+    "piiPolicy": "block",
+    "enabledTools": ["search_tenders", "get_tender", "search_documents", "get_contract_terms", "create_tender_db", "list_bids", "award_tender", "submit_bid"],
+    "approvals": { "awardTender": true, "createTenderAbove": 0 },
+    "limits": { "rateLimitPerMinute": 10, "monthlyBudgetUsd": 5 },
+    "webhooks": [
+      {
+        "id": "wh_umbrella_sap",
+        "url": "http://sap-gateway.umbrella.invalid/procurement/events",
+        "secret": "whsec_umbrella_demo_only",
+        "events": ["tender.created", "tender.awarded"]
+      }
+    ]
+  }
+}

@@ -15,6 +15,7 @@ x-app-env: &app-env
   REDIS_URL: redis://redis:6379
   KAFKA_BROKERS: kafka:9092
   KAFKA_INGEST_TOPIC: document.ingest
+  KAFKA_EVENTS_TOPIC: procurement.events
   KAFKAJS_NO_PARTITIONER_WARNING: "1"
   S3_ENDPOINT: http://s3:4566
   S3_REGION: us-east-1
@@ -103,6 +104,9 @@ services:
       SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
       SEMANTIC_CACHE_THRESHOLD: ${SEMANTIC_CACHE_THRESHOLD:-0.92}
       SEMANTIC_CACHE_TTL_SECONDS: ${SEMANTIC_CACHE_TTL_SECONDS:-3600}
+      CHECKPOINTER: ${CHECKPOINTER:-mongodb}
+      MOCK_ERP_FAIL_RATE: ${MOCK_ERP_FAIL_RATE:-0}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     ports: ["${API_PORT:-4000}:4000"]
     depends_on:
       mongo: { condition: service_healthy }
@@ -119,7 +123,10 @@ services:
     environment:
       <<: *app-env
       KAFKA_GROUP_ID: ingestion-workers
+      KAFKA_DISPATCH_GROUP_ID: integration-dispatcher
       HEALTH_PORT: 4001
+      WEBHOOK_MAX_ATTEMPTS: ${WEBHOOK_MAX_ATTEMPTS:-3}
+      WEBHOOK_BACKOFF_MS: ${WEBHOOK_BACKOFF_MS:-500}
     depends_on:
       api: { condition: service_healthy } # api creates the Kafka topic + S3 bucket on boot
     restart: unless-stopped
@@ -133,6 +140,31 @@ services:
       api: { condition: service_healthy }
     restart: unless-stopped
     networks: [frontend]
+
+  # ---------- Observability (optional): docker compose --profile observability up -d ----------
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [observability]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["9090:9090"]
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+    networks: [backend]
 
 networks:
   backend:

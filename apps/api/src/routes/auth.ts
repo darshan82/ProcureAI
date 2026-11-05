@@ -15,7 +15,7 @@ authRouter.post('/login', (req, res) => {
   const email = parsed.data.email.toLowerCase();
   const u = DEMO_USERS[email];
   if (!u || parsed.data.password !== config.demoPassword) throw new HttpError(401, 'Invalid credentials', 'unauthorized');
-  const user = { sub: email, name: u.name, role: u.role };
+  const user = { sub: email, name: u.name, role: u.role, tenantId: u.tenantId };
   res.json({ token: signToken(user), user: { ...user, org: u.org } });
 });
 

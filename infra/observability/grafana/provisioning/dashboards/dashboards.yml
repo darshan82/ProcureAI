@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: procureai
+    folder: ProcureAI
+    type: file
+    options: { path: /var/lib/grafana/dashboards }

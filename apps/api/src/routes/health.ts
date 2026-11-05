@@ -17,5 +17,6 @@ healthRouter.get('/ready', async (_req, res) => {
     status: ok ? 'ready' : 'degraded', checks,
     llm: { mode: config.llm.mode, model: config.llm.mode === 'openai' ? config.llm.model : 'mock', embeddings: embeddingInfo.model },
     langsmith: process.env.LANGSMITH_TRACING === 'true' ? 'enabled' : 'disabled',
+    checkpointer: process.env.CHECKPOINTER === 'memory' ? 'memory' : 'mongodb',
   });
 });

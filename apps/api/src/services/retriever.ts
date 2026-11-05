@@ -34,10 +34,10 @@ function dedupe(rows: RetrievedChunk[], k: number): RetrievedChunk[] {
   return out;
 }
 
-export async function searchChunks(query: string, k = 4, documentId?: string): Promise<RetrievedChunk[]> {
+export async function searchChunks(tenantId: string, query: string, k = 4, documentId?: string): Promise<RetrievedChunk[]> {
   const vector = await embedQuery(query);
   const chunks = getDb().collection<ChunkDoc>('chunks');
-  const filter: Record<string, unknown> = { embeddingModel: embeddingInfo.model };
+  const filter: Record<string, unknown> = { tenantId, embeddingModel: embeddingInfo.model };
   if (documentId) filter.documentId = documentId;
 
   if (config.mongo.vectorSearch === 'atlas') {

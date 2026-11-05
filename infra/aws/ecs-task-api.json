@@ -1,10 +1,15 @@
 {
   "family": "procurement-api",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
   "cpu": "512",
   "memory": "1024",
-  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
   "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/procurement-ecs-execution-role",
   "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/procurement-api-task-role",
   "containerDefinitions": [
@@ -12,35 +17,110 @@
       "name": "api",
       "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/procurement-api:${IMAGE_TAG}",
       "essential": true,
-      "portMappings": [{ "containerPort": 4000, "protocol": "tcp" }],
+      "portMappings": [
+        {
+          "containerPort": 4000,
+          "protocol": "tcp"
+        }
+      ],
       "environment": [
-        { "name": "NODE_ENV", "value": "production" },
-        { "name": "PORT", "value": "4000" },
-        { "name": "OPENAI_MODEL", "value": "gpt-4o-mini" },
-        { "name": "MONGO_DB", "value": "procurement" },
-        { "name": "MONGO_VECTOR_SEARCH", "value": "atlas" },
-        { "name": "KAFKA_INGEST_TOPIC", "value": "document.ingest" },
-        { "name": "S3_REGION", "value": "${AWS_REGION}" },
-        { "name": "S3_BUCKET", "value": "${S3_BUCKET}" },
-        { "name": "S3_FORCE_PATH_STYLE", "value": "false" },
-        { "name": "LANGSMITH_TRACING", "value": "true" },
-        { "name": "LANGSMITH_PROJECT", "value": "procureai" }
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "4000"
+        },
+        {
+          "name": "OPENAI_MODEL",
+          "value": "gpt-4o-mini"
+        },
+        {
+          "name": "MONGO_DB",
+          "value": "procurement"
+        },
+        {
+          "name": "MONGO_VECTOR_SEARCH",
+          "value": "atlas"
+        },
+        {
+          "name": "KAFKA_INGEST_TOPIC",
+          "value": "document.ingest"
+        },
+        {
+          "name": "S3_REGION",
+          "value": "${AWS_REGION}"
+        },
+        {
+          "name": "S3_BUCKET",
+          "value": "${S3_BUCKET}"
+        },
+        {
+          "name": "S3_FORCE_PATH_STYLE",
+          "value": "false"
+        },
+        {
+          "name": "LANGSMITH_TRACING",
+          "value": "true"
+        },
+        {
+          "name": "LANGSMITH_PROJECT",
+          "value": "procureai"
+        },
+        {
+          "name": "KAFKA_EVENTS_TOPIC",
+          "value": "procurement.events"
+        },
+        {
+          "name": "CHECKPOINTER",
+          "value": "mongodb"
+        }
       ],
       "secrets": [
-        { "name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/openai-api-key" },
-        { "name": "LANGSMITH_API_KEY", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/langsmith-api-key" },
-        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/jwt-secret" },
-        { "name": "MONGO_URL", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/mongo-url" },
-        { "name": "REDIS_URL", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/redis-url" },
-        { "name": "KAFKA_BROKERS", "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/kafka-brokers" }
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/openai-api-key"
+        },
+        {
+          "name": "LANGSMITH_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/langsmith-api-key"
+        },
+        {
+          "name": "JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/jwt-secret"
+        },
+        {
+          "name": "MONGO_URL",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/mongo-url"
+        },
+        {
+          "name": "REDIS_URL",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/redis-url"
+        },
+        {
+          "name": "KAFKA_BROKERS",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:procurement/kafka-brokers"
+        }
       ],
       "healthCheck": {
-        "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"],
-        "interval": 15, "timeout": 5, "retries": 3, "startPeriod": 60
+        "command": [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:4000/health || exit 1"
+        ],
+        "interval": 15,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
       },
       "logConfiguration": {
         "logDriver": "awslogs",
-        "options": { "awslogs-group": "/ecs/procurement-api", "awslogs-region": "${AWS_REGION}", "awslogs-stream-prefix": "api", "awslogs-create-group": "true" }
+        "options": {
+          "awslogs-group": "/ecs/procurement-api",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "api",
+          "awslogs-create-group": "true"
+        }
       }
     }
   ]

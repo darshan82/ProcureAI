@@ -52,3 +52,23 @@ test('PII scrubbing catches phone numbers split across lines (PDF text)', () => 
   const { text } = scrubPii('Contact: procurement@acme.test, +1 415\n555 0100.');
   assert.doesNotMatch(text, /415/);
 });
+
+test('webhook signatures verify, and reject tampering or stale timestamps', async () => {
+  const { sign, verify } = await import('./lib/webhookSignature.js');
+  const body = JSON.stringify({ type: 'tender.awarded', amount: 100 });
+  const header = sign('whsec_test_secret', body);
+  assert.equal(verify('whsec_test_secret', body, header).ok, true);
+  assert.equal(verify('whsec_test_secret', body.replace('100', '999'), header).ok, false);
+  assert.equal(verify('wrong_secret_value', body, header).ok, false);
+  const stale = sign('whsec_test_secret', body, Math.floor(Date.now() / 1000) - 3600);
+  assert.equal(verify('whsec_test_secret', body, stale).reason, 'timestamp outside tolerance');
+});
+
+test('tenant approval policy', async () => {
+  const { approvalReason } = await import('./agent/graph.js');
+  const tenant = { approvals: { awardTender: true, createTenderAbove: 100000 } } as any;
+  assert.ok(approvalReason({ name: 'award_tender', args: {} } as any, tenant));
+  assert.equal(approvalReason({ name: 'create_tender_db', args: { budget: 20000 } } as any, tenant), null);
+  assert.match(approvalReason({ name: 'create_tender_db', args: { budget: 250000 } } as any, tenant) ?? '', /exceeds/);
+  assert.equal(approvalReason({ name: 'search_tenders', args: {} } as any, tenant), null);
+});

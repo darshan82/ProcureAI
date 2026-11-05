@@ -1,30 +1,35 @@
-# ProcureAI: Enterprise AI Procurement Platform
+# ProcureAI: multi-tenant AI agent platform for procurement
 
-An end-to-end, production-style **LangChain / LangGraph** platform for procurement: buyers publish tenders and award contracts,
-suppliers submit bids, and everyone can ask an AI agent about tenders and the contracts behind them.
+A production-style **LangChain / LangGraph** platform built the way a **forward-deployed engineer** ships AI into
+customer environments. It onboards many customers as isolated tenants with their own policies, plugs into their systems
+through signed webhooks and MCP, proves quality with evals in CI, and runs with metering, guardrails and observability.
 
-It runs **fully offline without an OpenAI key** (built-in mock LLM + hash embeddings), and switches to OpenAI the moment you add one.
+It runs **fully offline without an OpenAI key** (deterministic mock LLM + hash embeddings) and switches to OpenAI as soon as you add one.
 
 ```
- Browser (React + Vite)  ──►  nginx  ──►  API gateway (Express + TypeScript)
-                                            │  JWT + RBAC ─ prompt-injection guard ─ PII scrubber
-                                            │  Redis semantic cache (HNSW, cosine ≥ 0.92)
-                                            │  LangGraph supervisor agent ──► Zod-typed tools ──► MongoDB
-                                            │        └─ human-in-the-loop interrupt (award_tender)
-                                            └─ upload: stream ─► S3 ─► Kafka "document.ingest" ─► 202 Accepted
-                                                                         │
-                         Ingestion worker (Kafka consumer) ◄─────────────┘
-                         S3 stream → PDF parse → overlapping chunks → batch embeddings → MongoDB vectors
-                         → invalidate semantic cache
+                          ┌──────────────────────── API gateway (Express + TS) ────────────────────────┐
+ React (Vite) ─ nginx ──► │ JWT ─ tenant resolve ─ rate limit/budget ─ injection guard ─ PII policy     │
+   SSE stream ◄────────── │ Redis semantic cache (per tenant+role, HNSW cosine)                         │
+ Claude Desktop ─ /mcp ─► │ LangGraph supervisor ─► LLM gateway (fallback chain, circuit breaker, $)    │
+                          │      ├─ Zod tools, tenant-scoped (Mongo)   ├─ HITL interrupt (policy-driven) │
+                          │      └─ checkpoints in MongoDB (durable)   └─ domain events ─► Kafka         │
+                          └───────────── upload ─► S3 ─► Kafka document.ingest ─► 202 ──────────────────┘
+ Worker (2 consumer groups)
+   ingestion-workers      : S3 stream → parse → chunk → batch embed → Mongo vectors → structured contract extraction
+   integration-dispatcher : procurement.events → HMAC-signed webhooks to customer ERP → retries → DLQ → admin replay
+ Observability: Prometheus /metrics (api + worker) → Grafana dashboard + alert rules · LangSmith traces
+ Quality: evals/ dataset + gates → GitHub Actions (typecheck, unit tests, Docker e2e, demos, eval gates)
 ```
 
 ## Screenshots
 
-| Agent with HITL approval, PII + guardrails | Async document ingestion |
+| Streaming agent with tenant approval policy | Structured contract extraction + risk flags |
 |---|---|
-| ![chat](docs/screenshots/4-chat.png) | ![documents](docs/screenshots/2-documents.png) |
-| **Platform: cache, guardrails, audit log** | **Login (BUYER / SUPPLIER)** |
-| ![platform](docs/screenshots/5-platform.png) | ![login](docs/screenshots/1-login.png) |
+| ![chat](docs/screenshots/chat.png) | ![contract](docs/screenshots/contract.png) |
+| **Admin console: tenants, usage, policies** | **Integrations: signed webhooks, DLQ, replay** |
+| ![tenants](docs/screenshots/admin-tenants.png) | ![integrations](docs/screenshots/admin-integrations.png) |
+| **Grafana: AI platform overview** | **Login: tenants and roles** |
+| ![grafana](docs/screenshots/grafana.png) | ![login](docs/screenshots/login.png) |
 
 ## Quick start
 
@@ -35,67 +40,54 @@ cp .env.example .env        # optional: put your OPENAI_API_KEY in .env (git-ign
 docker compose up -d --build
 ```
 
-Open **http://localhost:8080** and click **Buyer** or **Supplier** (password `demo123`).
+Open **http://localhost:8080** and pick a persona (password `demo123`):
 
-Run the three scripted live demos (Node 18+):
+| User | Tenant | Role | Try |
+|---|---|---|---|
+| buyer@acme.test | ACME Corp | BUYER | approvals, contract summary, bids |
+| supplier@globex.test | ACME Corp | SUPPLIER | submit bids, RBAC refusals |
+| buyer@umbrella.test | Umbrella Health (regulated) | BUYER | PII **blocked**, every tender needs approval |
+| supplier@stark.test | Umbrella Health | SUPPLIER | |
+| admin@procureai.test | platform | ADMIN | onboard tenants, tune policies, usage, webhook replay, LLM gateway |
 
 ```bash
-node scripts/demo.mjs all       # or: agent | security | ingest
+node scripts/demo.mjs all          # 9 live demos, 40+ checks
+node evals/run.mjs                 # eval suite + quality gates → evals/reports/latest.md
+docker compose --profile observability up -d   # + Prometheus :9090 and Grafana :3000
 ```
 
-| Service | URL |
-|---|---|
-| Web app | http://localhost:8080 |
-| API | http://localhost:4000 (`/ready` shows dependencies + LLM mode) |
-| Kafka (host listener) | localhost:29092 |
-| MongoDB / Redis / S3 (LocalStack) | localhost:27017 / 6379 / 4566 |
+### Adding your OpenAI key
+Put `OPENAI_API_KEY=sk-...` in `.env`, then run `docker compose up -d api worker`. Each tenant's `models` list becomes its fallback chain
+(e.g. `gpt-4o-mini → gpt-4.1-mini`), tokens stream live over SSE, contract extraction switches to structured output, and real token costs
+are metered per tenant. Optional: `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` (runs are tagged by tenant, role and user).
+Re-upload documents after switching, so they're embedded with the new model. `.env` is git-ignored.
 
-### Adding your OpenAI key later
-Edit `.env` → `OPENAI_API_KEY=sk-...`, then `docker compose up -d api worker`.
-The agent then uses `gpt-4o-mini` with real tool calling, and embeddings switch to `text-embedding-3-small` (1536-d).
-Re-upload documents after switching so they're embedded with the new model.
-Optional: `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` to trace every graph run in LangSmith.
+## What a forward-deployed engineer gets here
 
-> `.env` is in `.gitignore`. Never commit real keys.
+| Area | What it does | Where |
+|---|---|---|
+| **Multi-tenancy** | Row-level isolation on every collection, cache and thread; config-as-code onboarding (`apps/api/tenants/*.json`) + admin API; versioned Mongo migration from v1 | `services/tenants.ts`, `services/mongo.ts` |
+| **Per-tenant policy** | Model chain, cache threshold, PII `redact`/`block`, enabled tools, approval rules (awards, tenders above $X), rate limit, monthly budget, webhooks | `tenants/*.json`, admin console |
+| **LLM gateway** | Fallback chain, per-model circuit breaker, degraded mode, token + $ metering per tenant | `agent/llmGateway.ts`, `services/usage.ts` |
+| **Agent** | LangGraph supervisor, Zod tools, 3-layer authz (bound tools, in-tool checks, tenant scoping), policy-driven HITL `interrupt()`, durable MongoDB checkpointer | `agent/*` |
+| **Streaming** | SSE: graph steps + tokens, nginx unbuffered | `routes/chat.ts`, `api.ts` |
+| **RAG + extraction** | Async ingestion (S3 → Kafka → worker), chunking, batch embeddings, vector search; **structured contract extraction** (Zod schema, `withStructuredOutput`) + rule-based risk flags | `apps/worker/src/*` |
+| **Integrations** | Domain events → Kafka → **HMAC-signed webhooks** with retries, idempotency, **DLQ + replay**; mock customer ERP that verifies signatures | `worker/src/dispatcher.ts`, `routes/hooks.ts` |
+| **MCP server** | Streamable HTTP `/mcp`: Claude Desktop / IDE agents use the tools with the same JWT, tenancy and RBAC | `mcp/server.ts`, [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) |
+| **Security** | Prompt-injection guard, PII scrubbing on input *and* tool output, JWT + RBAC, rate limiting, budgets, audit log | `lib/*`, `middleware/*` |
+| **Evals** | 28-case dataset: tool selection, RAG, RBAC, isolation, approvals, attacks vs benign, PII, latency; optional LLM-as-judge; CI gates | `evals/` |
+| **Observability** | Prometheus metrics (latency, tokens, cost, cache, guardrails, tools, HITL, webhooks, ingestion), Grafana dashboard, alert rules | `lib/metrics.ts`, `infra/observability/` |
+| **Delivery** | Multi-stage Alpine images, health-gated Compose, GitHub Actions CI, ECS Fargate task defs + deploy script | `.github/`, `infra/aws/` |
 
-## What's inside
+Docs: [Architecture](docs/ARCHITECTURE.md) · [Integrations (webhooks, MCP)](docs/INTEGRATIONS.md) · [Runbook](docs/RUNBOOK.md) · [AWS](infra/aws/README.md)
 
-| Capability | Where |
-|---|---|
-| LangGraph state schema (messages, intent, toolsUsed, approval, piiRedactions) | `apps/api/src/agent/state.ts` |
-| Supervisor graph, conditional `execute_tools` routing, HITL `interrupt()` + resume | `apps/api/src/agent/graph.ts`, `runner.ts` |
-| Zod-typed tools (`create_tender_db`, `submit_bid`, `award_tender`, `search_documents`, …) with in-tool RBAC | `apps/api/src/agent/tools.ts` |
-| Offline mock LLM that emits real `tool_calls` | `apps/api/src/agent/mockLlm.ts` |
-| Prompt-injection guardrail middleware | `apps/api/src/lib/guardrails.ts`, `middleware/guardrails.ts` |
-| Real-time PII scrubbing before LLM egress (user input **and** tool outputs) | `apps/api/src/lib/pii.ts`, `agent/graph.ts` |
-| JWT auth + RBAC (BUYER vs SUPPLIER) | `apps/api/src/auth/jwt.ts`, `middleware/auth.ts` |
-| Streaming upload → S3 → Kafka producer → `202 Accepted` | `apps/api/src/routes/documents.ts`, `services/kafka.ts` |
-| Kafka consumer: S3 stream, PDF parse, overlapping chunker, batch embeddings, Mongo bulk upsert | `apps/worker/src/*` |
-| RAG retrieval (Atlas `$vectorSearch` or local cosine fallback) | `apps/api/src/services/retriever.ts` |
-| Redis HNSW semantic cache, write-through + invalidation | `apps/api/src/services/semanticCache.ts` |
-| Multi-stage Alpine Dockerfiles, non-root, health checks | `apps/*/Dockerfile` |
-| Compose orchestration with health-gated startup | `docker-compose.yml` |
-| ECS Fargate task definitions + ECR deploy script | `infra/aws/` |
-| Live demo CLI scripts | `scripts/demo.mjs` |
-| React UI: chat with trace/cache/PII badges, approval card, tenders, document upload, platform/audit | `apps/web/src/` |
-
-More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Local development without Docker for the apps
+## Local development
 
 ```bash
 docker compose up -d mongo redis kafka s3
-cd apps/api    && npm i && S3_ENDPOINT=http://localhost:4566 S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test npm run dev
-cd apps/worker && npm i && S3_ENDPOINT=http://localhost:4566 S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test npm run dev
-cd apps/web    && npm i && npm run dev     # http://localhost:5173, proxies /api → :4000
+cd apps/api    && npm ci && S3_ENDPOINT=http://localhost:4566 S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test npm run dev
+cd apps/worker && npm ci && S3_ENDPOINT=http://localhost:4566 S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test npm run dev
+cd apps/web    && npm ci && npm run dev     # http://localhost:5173, proxies /api → :4000
 ```
 
-Tests: `cd apps/api && npm test` (guardrails, PII, intent, embeddings).
-
-## Demo accounts
-
-| Email | Role | Password |
-|---|---|---|
-| buyer@acme.test | BUYER | demo123 |
-| supplier@globex.test | SUPPLIER | demo123 |
-| supplier@initech.test | SUPPLIER | demo123 |
+Unit tests: `npm test` in `apps/api` (guardrails, PII, intent, embeddings, webhook signatures, approval policy) and `apps/worker` (contract extraction).

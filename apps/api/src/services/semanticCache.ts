@@ -12,8 +12,9 @@ import { embedQuery, embeddingInfo } from './embeddings.js';
 type Redis = ReturnType<typeof createClient>;
 let redis: Redis | null = null;
 
+// Key layout: semcache:{dim}:{tenant}:{role}:{ts}:{rand}. Index v2 adds the tenant TAG.
 const PREFIX = `semcache:${embeddingInfo.dim}:`;
-const INDEX = `idx:semcache:${embeddingInfo.dim}`;
+const INDEX = `idx:semcache:v2:${embeddingInfo.dim}`;
 
 export async function connectRedis(): Promise<Redis> {
   if (redis) return redis;
@@ -40,6 +41,7 @@ async function ensureIndex() {
     await r.sendCommand([
       'FT.CREATE', INDEX, 'ON', 'HASH', 'PREFIX', '1', PREFIX,
       'SCHEMA',
+      'tenant', 'TAG',
       'role', 'TAG',
       'query', 'TEXT',
       'embedding', 'VECTOR', 'HNSW', '6', 'TYPE', 'FLOAT32', 'DIM', String(embeddingInfo.dim), 'DISTANCE_METRIC', 'COSINE',
@@ -73,11 +75,13 @@ export interface CacheHit {
   lookupMs: number;
 }
 
-export async function lookup(query: string, role: string): Promise<{ hit: CacheHit | null; vector: number[]; bestSimilarity: number | null; lookupMs: number }> {
+const tagSafe = (v: string) => v.replace(/[^a-zA-Z0-9_]/g, '_');
+
+export async function lookup(query: string, tenantId: string, role: string, threshold = config.cache.threshold): Promise<{ hit: CacheHit | null; vector: number[]; bestSimilarity: number | null; lookupMs: number }> {
   const t0 = performance.now();
   const vector = await embedQuery(query);
   const reply = await getRedis().sendCommand([
-    'FT.SEARCH', INDEX, `(@role:{${role}})=>[KNN 1 @embedding $vec AS dist]`,
+    'FT.SEARCH', INDEX, `(@tenant:{${tagSafe(tenantId)}} @role:{${role}})=>[KNN 1 @embedding $vec AS dist]`,
     'PARAMS', '2', 'vec', toBuffer(vector),
     'RETURN', '3', 'dist', 'answer', 'query',
     'SORTBY', 'dist', 'DIALECT', '2',
@@ -87,42 +91,42 @@ export async function lookup(query: string, role: string): Promise<{ hit: CacheH
   if (!rec) return { hit: null, vector, bestSimilarity: null, lookupMs };
   const similarity = 1 - Number(rec.dist);
   const rounded = Math.round(similarity * 1000) / 1000;
-  if (similarity >= config.cache.threshold) {
+  if (similarity >= threshold) {
     return { hit: { answer: rec.answer, matchedQuery: rec.query, similarity: rounded, lookupMs }, vector, bestSimilarity: rounded, lookupMs };
   }
   return { hit: null, vector, bestSimilarity: rounded, lookupMs };
 }
 
-export async function store(query: string, role: string, answer: string, vector?: number[]) {
+export async function store(query: string, tenantId: string, role: string, answer: string, vector?: number[]) {
   const vec = vector ?? (await embedQuery(query));
-  const key = `${PREFIX}${role}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  const key = `${PREFIX}${tagSafe(tenantId)}:${role}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
   const r = getRedis();
-  await r.sendCommand(['HSET', key, 'role', role, 'query', query, 'answer', answer, 'createdAt', new Date().toISOString(), 'embedding', toBuffer(vec)]);
+  await r.sendCommand(['HSET', key, 'tenant', tagSafe(tenantId), 'role', role, 'query', query, 'answer', answer, 'createdAt', new Date().toISOString(), 'embedding', toBuffer(vec)]);
   await r.expire(key, config.cache.ttlSeconds);
 }
 
-/** Drop every cached answer (all roles). Called after any write that changes ground truth. */
-export async function invalidateAll(reason: string): Promise<number> {
+/** Drop a tenant's cached answers (all roles). Called after any write that changes that tenant's ground truth. */
+export async function invalidateTenant(tenantId: string, reason: string): Promise<number> {
   const r = getRedis();
   let deleted = 0;
-  for await (const keys of r.scanIterator({ MATCH: 'semcache:*', COUNT: 500 })) {
+  for await (const keys of r.scanIterator({ MATCH: `semcache:*:${tagSafe(tenantId)}:*`, COUNT: 500 })) {
     const batch = Array.isArray(keys) ? keys : [keys];
     if (batch.length) deleted += await r.del(batch);
   }
-  logger.info('semantic cache invalidated', { reason, deleted });
+  logger.info('semantic cache invalidated', { tenantId, reason, deleted });
   return deleted;
 }
 
-export async function cacheStats() {
+export async function cacheStats(tenantId: string) {
   const r = getRedis();
   let entries = 0;
-  for await (const keys of r.scanIterator({ MATCH: `${PREFIX}*`, COUNT: 500 })) {
+  for await (const keys of r.scanIterator({ MATCH: `${PREFIX}${tagSafe(tenantId)}:*`, COUNT: 500 })) {
     entries += Array.isArray(keys) ? keys.length : 1;
   }
-  const [hits, misses] = await Promise.all([r.get('semcache_stats:hits'), r.get('semcache_stats:misses')]);
-  return { entries, hits: Number(hits ?? 0), misses: Number(misses ?? 0), threshold: config.cache.threshold, index: INDEX };
+  const [hits, misses] = await Promise.all([r.get(`semcache_stats:${tenantId}:hits`), r.get(`semcache_stats:${tenantId}:misses`)]);
+  return { entries, hits: Number(hits ?? 0), misses: Number(misses ?? 0), index: INDEX };
 }
 
-export async function recordStat(kind: 'hits' | 'misses') {
-  await getRedis().incr(`semcache_stats:${kind}`);
+export async function recordStat(tenantId: string, kind: 'hits' | 'misses') {
+  await getRedis().incr(`semcache_stats:${tenantId}:${kind}`);
 }

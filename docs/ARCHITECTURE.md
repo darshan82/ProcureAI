@@ -1,5 +1,8 @@
 # Architecture & design decisions
 
+> v2 adds multi-tenancy, an LLM gateway, durable HITL, SSE streaming, structured extraction, webhooks with DLQ,
+> an MCP server, evals in CI and Prometheus/Grafana. The v1 design below still applies; v2 sections follow it.
+
 ## Request path: chat
 1. **nginx** serves the SPA and proxies `/api` to the API (uploads are streamed, not buffered).
 2. **JWT auth** (`requireAuth`) → `req.user = { sub, role }`.
@@ -66,3 +69,47 @@ the offset is committed, so one bad file never blocks a partition.
 | 17 | ECS Fargate + ECR + ALB | `infra/aws/` |
 | 18 | LangSmith tracing (run names, tags, metadata) | `agent/runner.ts`, env `LANGSMITH_*` |
 | 19–20 | Live demo scripts 1–3 | `scripts/demo.mjs` |
+
+
+## v2: platform capabilities
+
+### Tenancy model
+Every business record carries `tenantId`, and every query filters on it. Threads are keyed `tenant::user::thread`, cache entries
+are tagged by tenant and role, and S3 keys are prefixed `tenants/<id>/`. Tenant settings are a Zod-validated document
+(config-as-code on boot, runtime edits via the admin API) and a snapshot is put in the graph state per run, so a policy change
+never alters a run that is already in flight.
+
+### Authorization layers
+1. Route RBAC (`requireRole`), 2. only tools allowed for the role *and* enabled for the tenant are bound to the model,
+3. each tool re-checks role and tenant enablement, 4. data access is tenant-scoped. Approvals are policy-driven per tenant
+(`approvalReason()`), and MCP never exposes tools that would bypass them.
+
+### LLM gateway
+Per-tenant ordered model chain, per-model circuit breaker (3 consecutive failures → open 30 s → half-open), degraded mode on the
+deterministic mock model, and token/cost metering per tenant per month in Redis (`usage:<tenant>:<YYYY-MM>`) mirrored into Prometheus.
+Budgets return **402** and rate limits **429 + Retry-After**.
+
+### Durable human-in-the-loop
+`MongoDBSaver` checkpoints every super-step (`agent_checkpoints`), so a paused approval survives restarts and any API replica can resume it.
+The approval card shows *why* the policy paused the run. `approval.requested` is emitted as a domain event for ERP/Slack workflows.
+
+### Structured extraction
+At ingestion the worker produces a schema-validated `ContractTerms` record (OpenAI `withStructuredOutput`, or heuristics offline),
+then **rule-based** risk flags (uncapped penalties, missing liability cap, termination for convenience, payment > 30 days, weights ≠ 100%).
+LLMs extract; deterministic rules judge risk, which keeps the output auditable for legal reviewers.
+
+### Integration dispatcher
+A separate consumer group on `procurement.events` delivers signed webhooks with timeouts, exponential backoff, idempotent bookkeeping
+(`webhook_deliveries`) and a dead-letter topic. Retries are in-process for simplicity; at higher volume move them to delay topics
+(`events.retry.1m`, `events.retry.10m`) so slow customers can't stall a partition.
+
+### Evals as a deployment gate
+`evals/run.mjs` measures tool-selection accuracy, answer pass rate, guardrail recall and false-positive rate, RBAC, isolation,
+approval policy, PII handling and latency, with optional LLM-as-judge groundedness. CI fails if any gate regresses. For a new
+customer, their real questions become new cases before go-live.
+
+### Trade-offs (v2)
+- **Shared database, tenantId column** vs database-per-tenant: cheaper and simpler to operate; regulated customers can get a dedicated
+  deployment with the same images (tenancy is a config concern).
+- **Fixed-window rate limit**: simple and good enough per user; a sliding window or token bucket smooths bursts at window edges.
+- **Circuit breaker in-process**: state is per replica. A shared breaker in Redis would converge faster across many replicas.

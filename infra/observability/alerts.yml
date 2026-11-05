@@ -1,0 +1,25 @@
+groups:
+  - name: procureai
+    rules:
+      - alert: LLMCircuitOpen
+        expr: max by (model) (llm_circuit_open) == 1
+        for: 1m
+        labels: { severity: page }
+        annotations: { summary: "LLM circuit open for {{ $labels.model }}: traffic is on the fallback model" }
+      - alert: AgentLatencyP95High
+        expr: histogram_quantile(0.95, sum by (le) (rate(agent_run_duration_seconds_bucket[5m]))) > 8
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "Agent p95 latency above 8s" }
+      - alert: WebhooksDeadLettering
+        expr: sum by (tenant) (increase(webhook_deliveries_total{status="dead_lettered"}[15m])) > 0
+        labels: { severity: ticket }
+        annotations: { summary: "Webhooks to {{ $labels.tenant }} are failing; check the customer's endpoint and replay from the DLQ" }
+      - alert: TenantBudgetBurn
+        expr: sum by (tenant) (increase(llm_cost_usd_total[1h])) > 2
+        labels: { severity: ticket }
+        annotations: { summary: "{{ $labels.tenant }} spent more than $2 on LLM calls in the last hour" }
+      - alert: GuardrailAttackSpike
+        expr: sum by (tenant) (increase(guardrail_blocks_total[10m])) > 20
+        labels: { severity: page }
+        annotations: { summary: "Spike of blocked prompts for {{ $labels.tenant }} (possible attack)" }

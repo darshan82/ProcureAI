@@ -59,6 +59,10 @@
         {
           "name": "EMBED_BATCH_SIZE",
           "value": "128"
+        },
+        {
+          "name": "KAFKA_EVENTS_TOPIC",
+          "value": "procurement.events"
         }
       ],
       "secrets": [

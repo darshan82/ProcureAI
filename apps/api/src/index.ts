@@ -2,6 +2,8 @@ import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { createApp } from './app.js';
 import { closeMongo, connectMongo, seedTenders } from './services/mongo.js';
+import { loadTenantConfigs } from './services/tenants.js';
+import { initGraph } from './agent/graph.js';
 import { connectRedis } from './services/semanticCache.js';
 import { closeKafka, connectKafka } from './services/kafka.js';
 import { ensureBucket } from './services/s3.js';
@@ -24,7 +26,9 @@ async function main() {
     logger.warn('OPENAI_API_KEY not set: running with the offline mock LLM + hash embeddings');
   }
   await retry('mongo', connectMongo);
+  await loadTenantConfigs();
   await seedTenders();
+  initGraph();
   await retry('redis', connectRedis);
   await retry('s3', ensureBucket);
   await retry('kafka', connectKafka);

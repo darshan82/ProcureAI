@@ -1,0 +1,22 @@
+{
+  "tenantId": "acme",
+  "name": "ACME Corp",
+  "region": "eu-west-1",
+  "plan": "enterprise",
+  "settings": {
+    "models": ["gpt-4o-mini", "gpt-4.1-mini"],
+    "cache": { "enabled": true, "threshold": 0.92 },
+    "piiPolicy": "redact",
+    "enabledTools": ["search_tenders", "get_tender", "search_documents", "get_contract_terms", "create_tender_db", "list_bids", "award_tender", "submit_bid"],
+    "approvals": { "awardTender": true, "createTenderAbove": 100000 },
+    "limits": { "rateLimitPerMinute": 30, "monthlyBudgetUsd": 50 },
+    "webhooks": [
+      {
+        "id": "wh_acme_erp",
+        "url": "http://api:4000/hooks/mock-erp/acme",
+        "secret": "whsec_acme_demo_only",
+        "events": ["tender.created", "bid.submitted", "tender.awarded", "document.ingested", "approval.requested"]
+      }
+    ]
+  }
+}

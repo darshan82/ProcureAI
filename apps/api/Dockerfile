@@ -18,6 +18,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
+COPY --chown=node:node tenants ./tenants
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=40s --retries=5 CMD wget -qO- http://127.0.0.1:4000/health || exit 1
